@@ -24,13 +24,35 @@ globalThis.createFontFromUrl = createFontFromUrl;
  * @param {number} index
  * @returns {Promise<FT_FaceRec[]>}
  */
-async function createGoogleFont(fontName, index = 0) {
-    const url = `https://fonts.googleapis.com/css?family=${fontName}`;
-    const css = await fetch(url);
-    const text = await css.text();
-    const urls = [...text.matchAll(/url\(([^\(\)]+)\)/g)].map((m) => m[1]);
-    console.log('google urls:', urls);
-    return await createFontFromUrl(urls[index]);
+async function createGoogleFont(fontName) {
+    let targetUrl;
+    try {
+        console.log('getting font', fontName);
+        const url = `https://fonts.googleapis.com/css?family=${fontName}`;
+        const css = await fetch(url, {
+        });
+        const text = await css.text();
+        const urls = [...text.matchAll(/url\(([^\(\)]+)\)/g)].map((m) => m[1]);
+        const fonts = await Promise.all(
+            urls.map(u => createFontFromUrl(u))
+        );
+        const nameStyleMap = new Map();
+        for (const fontFamilies of fonts) {
+            for (const font of fontFamilies) {
+                const styles = nameStyleMap.get(font.family_name) ?? new Set();
+                console.log('styles:', styles);
+                styles.add(font.style_name);
+                nameStyleMap.set(
+                    font.family_name,
+                    styles
+                );
+            }
+        }
+        return nameStyleMap;
+    } catch (err) {
+        console.error('Font css fetch failure', err);
+        throw err;
+    }
 }
 globalThis.createGoogleFont = createGoogleFont;
 
@@ -51,9 +73,15 @@ async function updateCache(str, cache) {
     }
 
     // Populate missing bitmaps
-    const newGlyphs = FreeType.LoadGlyphs(codes, FreeType.FT_LOAD_RENDER);
-    for (const [code, glyph] of newGlyphs) {
+    const newGlyphs = FreeType.LoadGlyphs(codes, FreeType.FT_LOAD_RENDER | FreeType.FT_LOAD_MONOCHROME);
+    for (const [code, glyph] of newGlyphs.entries()) {
+        console.log(code, 'glyph:', glyph);
+        if (!glyph) {
+            console.error('failed to load', code, String.fromCodePoint(code));
+            continue;
+        }
         const char = String.fromCodePoint(code);
+        console.log('cache update:', code, String.fromCodePoint(code), glyph);
         cache.set(char, {
             glyph,
             bitmap: glyph.bitmap.imagedata

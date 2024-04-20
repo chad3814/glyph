@@ -220,7 +220,7 @@ export type DrawCache = Map<string, {
 declare global {
     var FreeType: FreetypeModule;
     function createFontFromUrl(url: string): Promise<FT_FaceRec[]>;
-    function createGoogleFont(fontName: string, index?: number): Promise<FT_FaceRec[]>;
+    function createGoogleFont(fontName: string, index?: number): Promise<Map<string, Set<string>>>;
     function updateCache(str: string, cache: DrawCache): Promise<void>;
     function canvasWrite(ctx: CanvasRenderingContext2D, str: string, offsetX: number, offsetY: number, cache: DrawCache): Promise<void>;
 }
