@@ -55,7 +55,7 @@ export default function Canvas() {
                 y += glyph.advance.y / 64;
             }
         },
-        [canvas.current, fontName, fontStyle, fontManager.getFontInfo, fontManager.getGlyphs]
+        [fontName, fontStyle, fontManager]
     );
 
     useEffect(
@@ -76,7 +76,7 @@ export default function Canvas() {
                 }
             })();
         },
-        [fontName, fontStyle, setFontName, setFontStyle, draw, fontManager.loadFont]
+        [text, fontName, fontStyle, setFontName, setFontStyle, draw, fontManager, fontManager.loadFont]
     );
 
     const onUpdate = useCallback(
@@ -102,7 +102,7 @@ export default function Canvas() {
             setFontStyle(style);
             setFontName(family);
         },
-        [setFontName, setAvailableStyles, fontManager.getFontInfo],
+        [setFontName, setAvailableStyles, fontManager, fontName, fontStyle],
     );
 
     const changeStyle = useCallback(

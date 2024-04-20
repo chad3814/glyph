@@ -5,7 +5,7 @@ export default function Document() {
   return (
     <Html lang="en">
       <Head>
-        <script src="/freetype.js" type="module"></script>
+        <Script src="/freetype.js" type="module"/>
       </Head>
       <body>
         <Main />
