@@ -137,7 +137,7 @@ export interface FreetypeModule {
     linearVertAdvance: number;
     glyph_index: number;
     advance: FT_Vector;
-    metrics: number;
+    metrics: FT_Glyph_Metrics;
     format: number;
     bitmap: FT_Bitmap;
     bitmap_left: number;

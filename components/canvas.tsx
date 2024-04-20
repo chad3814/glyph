@@ -1,44 +1,34 @@
-import { DrawCache, FT_GlyphSlotRec } from "@/freetype";
 import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
-
-const GoogleFontMap: {[name: string]: string} = {
-    'Platypi': 'Platypi:ital,wght@0,300..800;1,300..800&display=swap',
-}
-
-const GoogleFontFamilyName: {[name: string]: string} = {
-    'Platypi': 'Platypi Light'
-}
-
-type GlyphInfo = {
-    glyph: FT_GlyphSlotRec;
-    bitmap?: ImageBitmap
-}
-
-const glyphCache: Map<string, DrawCache> = new Map<string, Map<string, GlyphInfo>>();
+import { useFontManager } from "./font-manager";
+import { FT_GlyphSlotRec } from "@/freetype";
 
 export default function Canvas() {
     const canvas = useRef<HTMLCanvasElement>(null);
     const [text, setText] = useState<string>('Hello World!');
     const [fontName, setFontName] = useState<string>('Licorice');
-    const [fontStyle, setFontStyle] = useState<string>('Regular');
-    const [availableStyles, setAvailableStyles] = useState<string[]>(['Regular']);
+    const [fontStyle, setFontStyle] = useState<string>('regular');
+    const [availableStyles, setAvailableStyles] = useState<string[]>(['regular']);
+    const fontManager = useFontManager();
 
     const draw = useCallback(
-        (str: string, fntName = fontName, fntStyle = fontStyle) => {
+        async (str: string, fntName = fontName, fntStyle = fontStyle) => {
             if (!canvas.current) {
+                console.error('draw, no canvas');
                 return;
             }
-            console.log('draw', str, fntName, fntStyle);
-            fntName = GoogleFontFamilyName[fntName] ?? fntName;
-            const fontFace = FreeType.SetFont(fntName, fntStyle);
-            const size = FreeType.SetPixelSize(0, 32 * window.devicePixelRatio);
-
-            if(!size || !fontFace) {
-                console.error(fntName, fntStyle, 'missing something', size, fontFace);
+            const font = fontManager.getFontInfo(fntName);
+            if (!font) {
+                console.error('draw, no font');
                 return;
             }
-            const lineHeight = size.height >> 6;
+            if (!font.variants.includes(fntStyle)) {
+                console.error('draw, no variant');
+                return;
+            }
 
+            const glyphs = await fontManager.getGlyphs(fntName, fntStyle, 0, 32 * window.devicePixelRatio, str);
+            console.log('draw, glyphs:', glyphs);
+            const lineHeight = (glyphs[0]?.metrics.height ?? 32 * 64) / 64;
             const ctx = canvas.current.getContext('2d');
             if (!ctx) {
                 console.error('failed to get canvas context');
@@ -46,82 +36,97 @@ export default function Canvas() {
             }
             ctx.fillStyle = 'white';
             ctx.fillRect(0, 0, canvas.current.width, canvas.current.height);
-            const cacheKey = `${fntName}-${fntStyle}`;
-            const cache = glyphCache.get(cacheKey) ?? new Map<string, GlyphInfo>();
-            glyphCache.set(cacheKey, cache);
-            canvasWrite(ctx, str, 20, 2 * lineHeight, cache);
+
+            let x = 20;
+            let y = lineHeight * 2;
+            let prev: FT_GlyphSlotRec | null = null;
+            for (const glyph of glyphs) {
+                if (!glyph || !glyph.bitmap.imagedata) continue;
+                const image = await createImageBitmap(glyph.bitmap.imagedata);
+                if (prev) {
+                    const kerning = fontManager.getKerning(prev, glyph);
+                    x += kerning.x / 64;
+                    y += kerning.y / 64;
+                }
+                prev = glyph;
+                console.log(`draw, (${x + glyph.bitmap_left}, ${y - glyph.bitmap_top})`, image, glyph);
+                ctx.drawImage(image, x + glyph.bitmap_left, y - glyph.bitmap_top);
+                x += glyph.advance.x / 64;
+                y += glyph.advance.y / 64;
+            }
         },
-        [canvas.current, fontName, fontStyle]
+        [canvas.current, fontName, fontStyle, fontManager.getFontInfo, fontManager.getGlyphs]
     );
 
     useEffect(
         () => {
-            if (typeof createGoogleFont === undefined) {
+            if (!fontManager) {
+                console.error('no font manager');
                 return;
             }
             (async () => {
                 try {
-                    const fontArgs = GoogleFontMap[fontName] ?? fontName;
-                    const nameStyleMap = await createGoogleFont(fontArgs);
-                    console.log('nameStyleMap:', nameStyleMap);
-                    const firstName = [...nameStyleMap.keys()][0];
-                    const styleSet = nameStyleMap.get(firstName) ?? null;
-                    if (!styleSet) {
-                        throw new Error('NoStyle');
-                    }
-                    const style = [...styleSet][0];
-                    setFontStyle(style);
-                    setAvailableStyles([...styleSet.values()]);
-                    draw(text, fontName, style);
+                    await fontManager.loadFont(fontName, fontStyle);
+                    draw(text);
                 } catch (err) {
+                    console.error('error:', err);
                     setFontName('Licorice');
-                    setFontStyle('Regular');
-                    draw(text, 'Licorice', 'Regular');
+                    setFontStyle('regular');
+                    draw(text, 'Licorice', 'regular');
                 }
             })();
         },
-        [globalThis.createGoogleFont, fontName, setFontName, setFontStyle]
+        [fontName, fontStyle, setFontName, setFontStyle, draw, fontManager.loadFont]
     );
 
     const onUpdate = useCallback(
-        async (str: string) => {
+        (str: string) => {
             setText(str);
-            console.log('str:', str);
-            draw(str, fontName, fontStyle);
+            draw(str);
         },
-        [setText, fontName, fontStyle]
+        [setText, draw]
     );
 
     const changeFont = useCallback(
         (evt: ChangeEvent<HTMLSelectElement>) => {
-            setFontName(evt.target.value);
+            fontManager.unloadFont(fontName, fontStyle);
+            const family = evt.target.value;
+            const fontInfo = fontManager.getFontInfo(family);
+
+            if (!fontInfo) {
+                console.error('no font');
+                return;
+            }
+            const style = fontInfo.variants.includes(fontStyle) ? fontStyle : fontInfo.variants[0];
+            setAvailableStyles(fontInfo.variants);
+            setFontStyle(style);
+            setFontName(family);
         },
-        [setFontName],
+        [setFontName, setAvailableStyles, fontManager.getFontInfo],
     );
+
     const changeStyle = useCallback(
         (evt: ChangeEvent<HTMLSelectElement>) => {
             const style = evt.target.value;
+            console.log('changeStyle', style);
             setFontStyle(style);
             draw(text, fontName, style);
         },
-        [setFontStyle, fontName, text]
+        [setFontStyle, fontName, text, draw]
     );
 
     return <div>
         <div>
             <canvas width={640} height={400} ref={canvas}/>
             <select onChange={changeFont} value={fontName}>
-                <option>Licorice</option>
-                <option>Noto Sans</option>
-                <option>Noto Serif</option>
-                <option>Micro 5</option>
-                <option>Roboto</option>
-                <option>Platypi</option>
+                {
+                    fontManager.getFamilies().map(family => <option key={family}>{family}</option>)
+                }
             </select>
             <select onChange={changeStyle} value={fontStyle}>
-                {availableStyles.map(
-                    style => <option>{style}</option>
-                )}
+                {
+                    availableStyles.map(style => <option key={style}>{style}</option>)
+                }
             </select>
         </div>
         <input type="text" onChange={(evt) => onUpdate(evt.target.value)} value={text} autoFocus={true}/>
